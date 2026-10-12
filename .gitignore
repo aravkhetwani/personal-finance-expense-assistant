@@ -1,0 +1,7 @@
+node_modules/
+client/dist/
+server/data/
+server/.env
+server/*.traineddata
+*.log
+.DS_Store

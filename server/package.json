@@ -1,0 +1,30 @@
+{
+  "name": "finance-assistant-server",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "API for the Personal Finance & Expense Budgeting Assistant (Release 1.0)",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "start": "node --env-file-if-exists=.env --disable-warning=ExperimentalWarning src/index.js",
+    "dev": "node --watch --env-file-if-exists=.env --disable-warning=ExperimentalWarning src/index.js",
+    "seed": "node --env-file-if-exists=.env --disable-warning=ExperimentalWarning src/seed.js",
+    "test": "node --disable-warning=ExperimentalWarning --test --test-concurrency=1 test/*.test.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
+    "express-rate-limit": "^8.7.1",
+    "helmet": "^8.3.0",
+    "jsonwebtoken": "^9.0.3",
+    "multer": "^2.4.0",
+    "nodemailer": "^10.0.15",
+    "pdfkit": "^0.20.2"
+  },
+  "optionalDependencies": {
+    "tesseract.js": "^7.0.0"
+  }
+}
