@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { api } from '../api.js';
 import { useAuth } from '../auth.jsx';
-import { Alert, Empty, PageHeader, Spinner, useLoad } from '../components/ui.jsx';
+import { Alert, Disclaimer, Empty, PageHeader, Spinner, useLoad } from '../components/ui.jsx';
 import { CategoryPie, SavingsBar, TrendLine } from '../components/charts.jsx';
 import { money, monthLabel } from '../util.js';
 
@@ -20,6 +20,7 @@ export default function Insights() {
   return (
     <>
       <PageHeader title="Insights" help="Insights" />
+      <Disclaimer>Ideas about saving, debt and insurance are general information only. This application is not a registered financial advisor.</Disclaimer>
       <p className="muted">Suggestions are based on your own history over the last 12 months. They are ideas to consider — you know your situation best.</p>
 
       <section aria-labelledby="rec-h" className="card">

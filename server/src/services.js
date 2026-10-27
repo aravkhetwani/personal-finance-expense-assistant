@@ -2,9 +2,10 @@ import { db } from './db.js';
 import { decNum, decrypt, encNum, encrypt } from './crypto.js';
 import { monthOf, round2, today, addDays, addMonths } from './http.js';
 import { sendMail } from './mailer.js';
+import { sendPush } from './push.js';
 
 export const DEFAULT_EXPENSE_CATEGORIES = [
-  'Food', 'Rent', 'Utilities', 'Entertainment', 'Transport', 'Health', 'Shopping', 'Education', 'Insurance', 'Other',
+  'Food', 'Rent', 'Utilities', 'Entertainment', 'Transport', 'Health', 'Shopping', 'Education', 'Insurance', 'Loan EMI', 'Other',
 ];
 export const DEFAULT_INCOME_CATEGORIES = ['Salary', 'Freelance', 'Investments', 'Gifts', 'Other'];
 
@@ -29,6 +30,7 @@ export function publicUser(u) {
     openingBalance: u.opening_balance_enc ? decNum(u.opening_balance_enc) : 0,
     notifyEmail: !!u.notify_email,
     notifyInApp: !!u.notify_inapp,
+    notifyPush: !!u.notify_push,
     billLeadDays: u.bill_lead_days,
     onboarded: !!u.onboarded,
     createdAt: u.created_at,
@@ -50,6 +52,7 @@ export async function notify(user, kind, title, message, dedupeKey = null) {
       user.id, kind, title, message, dedupeKey
     );
   }
+  if (user.notify_push) await sendPush(user.id, { title, body: message, url: '/notifications', tag: kind });
   if (user.notify_email) await sendMail(user.email, title, `${message}\n\n— Personal Finance & Expense Budgeting Assistant`);
   return true;
 }
@@ -172,3 +175,8 @@ export function resolveCategory(userId, type, { categoryId, categoryName }) {
 }
 
 export const enc = { num: encNum, text: encrypt };
+
+// Adds any default categories introduced by newer releases to every existing account (idempotent).
+export function ensureDefaultCategories() {
+  for (const u of db.prepare('SELECT id FROM users').all()) seedCategories(u.id);
+}

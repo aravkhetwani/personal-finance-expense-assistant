@@ -6,7 +6,8 @@ import { config } from './config.js';
 import { db } from './db.js';
 import { createApp } from './app.js';
 import { startJobs } from './scheduler.js';
-import { seedCategories } from './services.js';
+import { ensureDefaultCategories, seedCategories } from './services.js';
+import { exposeCodes, getSmtp } from './mailer.js';
 import { checkPassword } from './routes/auth.js';
 
 async function ensureAdmin() {
@@ -21,6 +22,7 @@ async function ensureAdmin() {
 }
 
 await ensureAdmin();
+ensureDefaultCategories();
 const app = createApp();
 const server =
   config.tls.key && config.tls.cert
@@ -28,7 +30,8 @@ const server =
     : http.createServer(app);
 server.listen(config.port, () => {
   console.log(`Finance Assistant API listening on ${config.tls.key ? 'https' : 'http'}://localhost:${config.port}`);
-  if (config.devExposeCodes) console.log('[dev] SMTP not configured: OTP/reset codes are returned in API responses and logged here.');
+  if (exposeCodes()) console.log('[dev] No mail server configured: OTP/reset codes are returned in API responses and logged here. An administrator can add SMTP settings on the Administration page.');
+  else if (getSmtp()) console.log(`[mail] using SMTP server ${getSmtp().host} (${getSmtp().source})`);
   if (config.production && !config.tls.key) console.log('[warn] No TLS configured; terminate HTTPS at a reverse proxy (see README).');
 });
 startJobs();

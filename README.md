@@ -13,8 +13,9 @@ bill reminders, tax guidance, receipt scanning (OCR), reports/exports, help, and
 | Data protection | AES-256-GCM field encryption (amounts, notes, goals, bills, income) · helmet · rate limiting |
 | Web client | React 19 · React Router · Chart.js (accessible, with data tables) · plain CSS (light/dark, responsive) |
 | OCR | tesseract.js (receipts are processed in memory, never stored) |
-| E-mail | nodemailer over SMTP (dev fallback: console + `outbox` table) |
+| E-mail | nodemailer over SMTP, configurable in the admin page (dev fallback: console + `outbox` table), HTML + text, automatic retries |
 | PDF | pdfkit |
+| Push | web-push (VAPID) + service worker, installable web app manifest |
 
 ## Quick start
 
@@ -32,12 +33,39 @@ Seeded accounts (change/remove before real use):
 * Administrator — `admin@example.com` / `AdminPass1234`
 
 For development with hot reload run `npm run dev:server` and `npm run dev:client` (Vite on :5173 proxies `/api`).
-Run the test-suite with `npm test` (26 tests: auth, encryption at rest, budgets, bills, CSV, reports, admin, …).
+Run the test-suite with `npm test` (32 tests: auth, encryption at rest, budgets, bills, CSV, reports, admin, real SMTP delivery, push subscriptions, …).
+
+### E-mail
+E-mail is used for sign-up and sign-in codes, password reset links, budget and bill reminders, and security notices
+(welcome, password changed, two-step sign-in changed, account locked). Messages are sent as HTML with a plain-text part.
+
+* **Set it up in the app:** sign in as an administrator, open **Administration → E-mail (SMTP) settings**, enter the host,
+  port, username and password (for Gmail: `smtp.gmail.com`, port 465 with SSL, your address and an *app password*), save,
+  and use **Send test** to check it. The password is stored encrypted and never shown again.
+* **Or use environment variables** (`SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`, see `server/.env.example`).
+  Settings saved in the app take priority.
+* Every message is recorded in the **outbox** (status sent / failed / logged). Failed messages are **retried automatically**
+  (up to three times) and can be retried by hand from the admin page.
+* With no mail server the app still works: codes are shown on screen in development and messages are written to the server log.
+  Once a mail server is configured, codes are only e-mailed.
+
+### Push notifications and installable app
+Users can turn on **Push notifications on this device** under *Profile*. The browser asks for permission, the device is
+registered with the server (Web Push with VAPID keys, generated once into `server/data/.vapid.json` or taken from
+`VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY`), and every alert that is created in the app is also pushed to the device.
+The app ships a web manifest and service worker, so it can be **installed** on a phone or desktop (OE-2) and shows alerts
+even when the tab is closed. Push needs HTTPS in production (localhost is fine for development).
+
+### Insurance and debt suggestions
+Insights also include the SRS "insurance policies and debt restructuring" ideas: a nudge when no insurance premium is found
+in the last twelve months, and a suggestion to consider refinancing or paying the highest-interest debt first when loan/EMI/card
+payments reach 20 % (tip) or 35 % (stronger suggestion) of income. They are rule-based, worded as ideas, and carry the
+"not financial advice" note. A *Loan EMI* default category was added for this.
 
 ### E-mail in development
-With no `SMTP_HOST` configured the app is still fully usable: verification codes and reset links are shown
-in the UI ("dev mode" banner) and printed in the server console. In production configure SMTP (see `server/.env.example`);
-codes are then never returned by the API.
+With no mail server configured the app is still fully usable: verification codes and reset links are shown
+in the UI ("dev mode" banner) and printed in the server console. Once SMTP is configured (in the admin page or the environment),
+codes are never returned by the API.
 
 ## Requirement coverage
 
@@ -49,7 +77,7 @@ codes are then never returned by the API.
 | FR-BUDG-001…003 budgets, real-time alerts (80 % / 100 %), adjust/disable | `routes/budgets.js`, `services.js#checkBudgetAlerts` |
 | FR-INSIGHT-001…005 12-month analysis, savings suggestions, pie, trends, CSV/PDF | `recommendations.js`, `routes/insights.js`, `routes/reports.js`, `Insights.jsx` |
 | FR-INV-001…004 goals, progress, investment ideas by risk × horizon, est. returns + disclaimer | `routes/goals.js`, `recommendations.js`, `Goals.jsx` |
-| FR-BILL-001…003 bills, in-app + e-mail reminders, preferences | `routes/bills.js`, `scheduler.js`, `Bills.jsx`, `Profile.jsx` |
+| FR-BILL-001…003 bills, in-app + e-mail + push reminders, preferences | `routes/bills.js`, `scheduler.js`, `mailer.js`, `push.js`, `Bills.jsx`, `Profile.jsx` |
 | FR-TAX-001/002 tax guidance + disclaimer | `routes/tax.js`, `Tax.jsx` |
 | FR-SCAN-001…003 upload, OCR, review before saving | `ocr.js`, `routes/receipts.js`, `Transactions.jsx` |
 | NFR-PERF | Indexed queries, small payloads, code-split charts; not load-tested — see deployment notes for the 10,000-user target |
@@ -81,5 +109,5 @@ codes are then never returned by the API.
 
 ## Known scope limits (from the SRS)
 
-Bank-API integration (TBD-001), subscription tiers (TBD-002) and native iOS/Android apps are out of Release 1.0;
-the responsive web app covers OE-2. Push notifications are delivered as in-app + e-mail.
+Bank-API integration (TBD-001) and subscription tiers (TBD-002) are out of Release 1.0, as the SRS defers them.
+The responsive, installable web app (with push notifications) covers OE-2; there are no separate native iOS/Android apps.

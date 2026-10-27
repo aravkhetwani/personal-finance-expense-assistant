@@ -20,6 +20,7 @@ import taxRoutes from './routes/tax.js';
 import reportRoutes from './routes/reports.js';
 import receiptRoutes from './routes/receipts.js';
 import adminRoutes from './routes/admin.js';
+import pushRoutes from './routes/push.js';
 
 export function createApp() {
   const app = express();
@@ -53,6 +54,7 @@ export function createApp() {
   secured.use('/tax', taxRoutes);
   secured.use('/reports', reportRoutes);
   secured.use('/receipts', receiptRoutes);
+  secured.use('/push', pushRoutes);
   secured.use('/admin', requireAdmin, adminRoutes);
   app.use('/api', secured);
   app.use('/api', (_req, _res, next) => next(new HttpError(404, 'Not found')));

@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { useAuth } from '../auth.jsx';
 import { Alert, ConfirmDelete, Field, PageHeader, Toast } from '../components/ui.jsx';
+import { currentSubscription, disablePush, enablePush, pushSupported } from '../push.js';
 
 export default function Profile() {
   const { user, setUser, signOut } = useAuth();
@@ -16,6 +17,37 @@ export default function Profile() {
   const [toast, setToast] = useState('');
   const [del, setDel] = useState(false);
   const [delPw, setDelPw] = useState('');
+  const [pushOn, setPushOn] = useState(false);
+  const [canInstall, setCanInstall] = useState(!!window.__installPrompt);
+  useEffect(() => {
+    currentSubscription().then((s) => setPushOn(!!s && user.notifyPush)).catch(() => {});
+    const on = () => setCanInstall(true);
+    window.addEventListener('install-available', on);
+    return () => window.removeEventListener('install-available', on);
+  }, [user.notifyPush]);
+  async function togglePush(e) {
+    const want = e.target.checked;
+    try {
+      if (want) await enablePush(); else await disablePush();
+      setPushOn(want);
+      setUser({ ...user, notifyPush: want });
+      setToast(want ? 'Push notifications are on for this device.' : 'Push notifications are off.');
+    } catch (x) { setToast(x.message); }
+  }
+  async function testPush() {
+    try { const r = await api.post('/push/test'); setToast(r.sent ? 'Test notification sent. It should appear in a moment.' : 'The push service did not accept it. Try turning push off and on again.'); } catch (x) { setToast(x.message); }
+  }
+  async function testEmail() {
+    try { const r = await api.post('/auth/me/test-email'); setToast(r.message); } catch (x) { setToast(x.message); }
+  }
+  async function install() {
+    const ev = window.__installPrompt;
+    if (!ev) return;
+    ev.prompt();
+    await ev.userChoice.catch(() => {});
+    window.__installPrompt = null;
+    setCanInstall(false);
+  }
   const set = (k) => (e) => setF({ ...f, [k]: e.target.type === 'checkbox' ? e.target.checked : e.target.value });
   const flash = (k, v) => setMsg((m) => ({ ...m, [k]: v }));
 
@@ -50,6 +82,13 @@ export default function Profile() {
         <h3>Notifications</h3>
         <label className="check"><input type="checkbox" checked={f.notifyInApp} onChange={set('notifyInApp')} /> In-app notifications</label>
         <label className="check"><input type="checkbox" checked={f.notifyEmail} onChange={set('notifyEmail')} /> Email notifications</label>
+        <p><button type="button" className="btn small" onClick={testEmail}>Send me a test e-mail</button></p>
+        <label className="check">
+          <input type="checkbox" checked={pushOn} onChange={togglePush} disabled={!pushSupported()} /> Push notifications on this device
+          {!pushSupported() && <span className="muted small"> (not supported by this browser)</span>}
+        </label>
+        {pushOn && <p><button type="button" className="btn small" onClick={testPush}>Send a test notification</button></p>}
+        {canInstall && <p><button type="button" className="btn small" onClick={install}>Install this app on my device</button></p>}
         <Field label="Remind me about bills this many days before they're due">{(p) => <input {...p} type="number" min="0" max="30" value={f.billLeadDays} onChange={set('billLeadDays')} />}</Field>
         <Alert>{msg.save}</Alert>
         <button className="btn primary">Save changes</button>

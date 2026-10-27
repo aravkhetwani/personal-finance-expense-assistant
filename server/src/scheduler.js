@@ -5,6 +5,7 @@ import { db } from './db.js';
 import { decNum } from './crypto.js';
 import { addDays, today } from './http.js';
 import { notify } from './services.js';
+import { retryFailed } from './mailer.js';
 
 // FR-BILL-002: proactive reminders (in-app + e-mail) based on each user's preferences.
 // Called on a timer and right after a bill is created. Dedupe keys prevent repeats.
@@ -43,7 +44,7 @@ export function runBackup(keep = 7) {
 
 export function startJobs() {
   const hour = 3600 * 1000;
-  const run = () => runBillReminders().catch((e) => console.error('[jobs] reminders failed:', e.message));
+  const run = () => runBillReminders().then(() => retryFailed()).catch((e) => console.error('[jobs] reminders failed:', e.message));
   setTimeout(run, 5000).unref();
   setInterval(run, hour).unref();
   setInterval(() => {

@@ -113,6 +113,38 @@ export function buildInsights({ transactions, budgets, currentMonth }) {
     }
   }
 
+  // SRS 1.4: suggestions for debt restructuring and insurance. Phrased as ideas, with a general-information note (BR-001, NFR-SAF-001).
+  const isDebt = (t) => /loan|emi|credit card|debt/i.test(`${t.category || ''} ${t.notes}`);
+  const lastDebt = round2(lastExp.filter(isDebt).reduce((a, t) => a + t.amount, 0));
+  if (sumI > 0 && lastDebt > 0) {
+    const share = Math.round((lastDebt / sumI) * 100);
+    if (share >= 35) {
+      out.push({
+        id: 'debt-high', kind: 'saving', title: 'Debt payments take a large share of your income',
+        message: `Loan and card payments were about ${share}% of your income last month (${money(lastDebt)}). If you would like more breathing room, you could ask your lender about refinancing or consolidating the loans, or put any extra money towards the debt with the highest interest first. This is general information, not financial advice.`,
+        rationale: `Debt payments ${money(lastDebt)} against income ${money(sumI)}. Many planners suggest keeping total debt payments below roughly 35–40% of income.`,
+        data: { debtPayments: lastDebt, shareOfIncome: share },
+      });
+    } else if (share >= 20) {
+      out.push({
+        id: 'debt-moderate', kind: 'tip', title: 'An idea for paying debt down faster',
+        message: `Your loan and card payments were about ${share}% of income last month. If you can spare a little extra, paying more towards the highest-interest debt first (often called the avalanche method) can reduce the total interest you pay. This is general information, not financial advice.`,
+        rationale: `Debt payments ${money(lastDebt)} against income ${money(sumI)}.`,
+        data: { debtPayments: lastDebt, shareOfIncome: share },
+      });
+    }
+  }
+  const monthsWithData = new Set(transactions.map((t) => t.date.slice(0, 7))).size;
+  const hasInsurance = exp.some((t) => /insurance|premium/i.test(`${t.category || ''} ${t.notes}`));
+  if (!hasInsurance && monthsWithData >= 3) {
+    out.push({
+      id: 'insurance-none', kind: 'tip', title: 'Have you thought about insurance cover?',
+      message: 'We could not find any insurance premiums in your records for the last 12 months. Health cover and, if others depend on your income, term life cover can protect your savings from big surprises. Comparing a few policies is a good first step. This is general information, not financial advice.',
+      rationale: 'No transaction in the category "Insurance" or mentioning insurance or a premium was found. If you pay premiums another way (for example through an employer), you can ignore this.',
+      data: {},
+    });
+  }
+
   const budgeted = new Set(budgets.map((b) => b.category));
   const totalByCat = [...byCatMonth.entries()]
     .map(([c, m]) => [c, m.get(lastMonth) || 0])

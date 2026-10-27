@@ -6,7 +6,7 @@ import { db, inFuture, nowIso, tx } from '../db.js';
 import { randomOtp, randomToken, sha256, encNum } from '../crypto.js';
 import { HttpError, bad, str, num, oneOf } from '../http.js';
 import { issueSession, requireAuth } from '../auth.js';
-import { sendMail } from '../mailer.js';
+import { exposeCodes, sendMail } from '../mailer.js';
 import { logEvent } from '../security.js';
 import { publicUser, seedCategories, loadTransactions } from '../services.js';
 
@@ -46,7 +46,7 @@ function checkOtp(user, purpose, code) {
   db.prepare('UPDATE otps SET used = 1 WHERE id = ?').run(row.id);
 }
 
-const withDev = (body, code) => (config.devExposeCodes && code ? { ...body, devCode: code } : body);
+const withDev = (body, code) => (exposeCodes() && code ? { ...body, devCode: code } : body);
 
 r.post('/register', async (req, res) => {
   const email = str(req.body.email, 'Email', { max: 254 }).toLowerCase();
@@ -68,7 +68,7 @@ r.post('/register', async (req, res) => {
   res.status(201).json(withDev({ message: 'We sent a 6-digit verification code to your email.', email }, code));
 });
 
-r.post('/verify-otp', (req, res) => {
+r.post('/verify-otp', async (req, res) => {
   const email = str(req.body.email, 'Email').toLowerCase();
   const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
   if (!user) throw bad('That code is not correct.');
@@ -76,6 +76,7 @@ r.post('/verify-otp', (req, res) => {
     checkOtp(user, 'verify', req.body.code); // FR-AUTH-002
     db.prepare('UPDATE users SET verified = 1 WHERE id = ?').run(user.id);
     logEvent(user.id, 'email_verified', req);
+    await sendMail(user.email, 'Welcome to Finance Assistant', `Hi ${user.name},\n\nYour email is verified and your account is ready. A good way to start is to add your first expense, then set a monthly budget for a category you want to keep an eye on.\n\nYou can turn reminders, e-mail and push notifications on or off any time under Profile. Every page has a Help link if you get stuck.`);
   } else {
     throw bad('This email is already verified. Please sign in.');
   }
@@ -112,6 +113,7 @@ r.post('/login', async (req, res) => {
     if (attempts >= config.maxFailedLogins) {
       db.prepare('UPDATE users SET failed_attempts = 0, locked_until = ? WHERE id = ?').run(inFuture(config.lockMinutes), user.id);
       logEvent(user.id, 'account_locked', req);
+      await sendMail(user.email, 'Your account was temporarily locked', `There were several unsuccessful sign-in attempts on your account, so it has been locked for ${config.lockMinutes} minutes as a precaution.\n\nIf this was you, just wait and try again. If it was not you, we suggest resetting your password once the lock ends.`);
     } else {
       db.prepare('UPDATE users SET failed_attempts = ? WHERE id = ?').run(attempts, user.id);
     }
@@ -163,7 +165,7 @@ r.post('/forgot-password', async (req, res) => {
     logEvent(user.id, 'password_reset_requested', req);
   }
   const body = { message: 'If an account exists for that email, a reset link has been sent.' };
-  res.json(config.devExposeCodes && token ? { ...body, devToken: token } : body);
+  res.json(exposeCodes() && token ? { ...body, devToken: token } : body);
 });
 
 r.post('/reset-password', async (req, res) => {
@@ -177,6 +179,8 @@ r.post('/reset-password', async (req, res) => {
     db.prepare('UPDATE sessions SET revoked = 1 WHERE user_id = ?').run(row.user_id);
   });
   logEvent(row.user_id, 'password_reset_completed', req);
+  const who = db.prepare('SELECT email FROM users WHERE id = ?').get(row.user_id);
+  if (who) await sendMail(who.email, 'Your password was changed', 'Your password was just reset and all devices were signed out. If this was not you, please reset it again straight away and turn on two-step sign-in.');
   res.json({ message: 'Your password has been updated. You can sign in now.' });
 });
 
@@ -203,13 +207,14 @@ r.put('/me', requireAuth, (req, res) => {
     `UPDATE users SET name=?, phone=?, currency=?, risk_tolerance=?, tax_region=?,
        annual_income_enc = CASE WHEN ? = 1 THEN ? ELSE annual_income_enc END,
        opening_balance_enc = CASE WHEN ? = 1 THEN ? ELSE opening_balance_enc END,
-       notify_email = ?, notify_inapp = ?, bill_lead_days = ?, onboarded = ? WHERE id = ?`
+       notify_email = ?, notify_inapp = ?, notify_push = ?, bill_lead_days = ?, onboarded = ? WHERE id = ?`
   ).run(
     name, phone, currency, risk, region,
     income === undefined ? 0 : 1, income === null || income === undefined ? null : encNum(income),
     opening === undefined ? 0 : 1, opening === undefined ? null : encNum(opening),
     b.notifyEmail !== undefined ? (b.notifyEmail ? 1 : 0) : u.notify_email,
     b.notifyInApp !== undefined ? (b.notifyInApp ? 1 : 0) : u.notify_inapp,
+    b.notifyPush !== undefined ? (b.notifyPush ? 1 : 0) : u.notify_push,
     b.billLeadDays !== undefined ? num(b.billLeadDays, 'Reminder lead days', { min: 0, max: 30 }) : u.bill_lead_days,
     b.onboarded !== undefined ? (b.onboarded ? 1 : 0) : u.onboarded,
     u.id
@@ -225,6 +230,7 @@ r.put('/me/password', requireAuth, async (req, res) => {
   db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hash, req.user.id);
   db.prepare('UPDATE sessions SET revoked = 1 WHERE user_id = ? AND id != ?').run(req.user.id, req.sid);
   logEvent(req.user.id, 'password_changed', req);
+  await sendMail(req.user.email, 'Your password was changed', 'Your password was just changed from your profile and your other devices were signed out. If this was not you, reset your password straight away.');
   res.json({ message: 'Password updated.' });
 });
 
@@ -232,7 +238,19 @@ r.put('/me/mfa', requireAuth, async (req, res) => {
   if (!(await bcrypt.compare(String(req.body.password || ''), req.user.password_hash))) throw new HttpError(403, 'Password is incorrect');
   db.prepare('UPDATE users SET mfa_enabled = ? WHERE id = ?').run(req.body.enabled ? 1 : 0, req.user.id);
   logEvent(req.user.id, req.body.enabled ? 'mfa_enabled' : 'mfa_disabled', req);
+  await sendMail(req.user.email, `Two-step sign-in ${req.body.enabled ? 'turned on' : 'turned off'}`, `Two-step sign-in was ${req.body.enabled ? 'turned on' : 'turned off'} for your account. If you did not do this, please change your password.`);
   res.json({ mfaEnabled: !!req.body.enabled });
+});
+
+// Lets a user check that e-mail from the application reaches them.
+r.post('/me/test-email', requireAuth, async (req, res) => {
+  const result = await sendMail(req.user.email, 'Test e-mail from Finance Assistant', 'This is a test message. If you can read it, e-mail notifications are working for your account.');
+  const messages = {
+    sent: 'Test e-mail sent. Please check your inbox.',
+    logged: 'No mail server is configured yet, so the message was only written to the server log. An administrator can set one up.',
+    failed: 'The mail server did not accept the message. It will be retried automatically.',
+  };
+  res.json({ status: result.status, delivered: result.status === 'sent', message: messages[result.status] });
 });
 
 // CO-5 / DR: data portability — everything the user owns, as JSON.
